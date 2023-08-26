@@ -15,6 +15,16 @@ from .axes import AxesArray
 # no checks on t.
 T_DEFAULT = object()
 
+def print_pde(w, rhs_description, ut = 'u_t'):
+    pde = ut + ' = '
+    first = True
+    for i in range(len(w)):
+        if w[i] != 0:
+            if not first:
+                pde = pde + ' + '
+            pde = pde + "(%05f %+05fi)" % (w[i].real, w[i].imag) + rhs_description[i] + "\n   "
+            first = False
+    print(pde)
 
 def flatten_2d_tall(x):
     return x.reshape(x.size // x.shape[-1], x.shape[-1])

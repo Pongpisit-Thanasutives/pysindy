@@ -13,6 +13,7 @@ from sklearn.base import BaseEstimator
 from sklearn.metrics import r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.utils.validation import check_is_fitted
+from statsmodels.api import OLS
 
 from .differentiation import FiniteDifference
 from .feature_library import PolynomialLibrary
@@ -33,6 +34,7 @@ from .utils import SampleConcatter
 from .utils import validate_control_variables
 from .utils import validate_input
 from .utils import validate_no_reshape
+from .utils import print_pde
 
 
 class SINDy(BaseEstimator):
@@ -156,6 +158,7 @@ class SINDy(BaseEstimator):
         feature_names=None,
         t_default=1,
         discrete_time=False,
+        cache=False,
     ):
         if optimizer is None:
             optimizer = STLSQ()
@@ -174,6 +177,8 @@ class SINDy(BaseEstimator):
             self.t_default = t_default
         self.feature_names = feature_names
         self.discrete_time = discrete_time
+        self.cache = cache
+        self.cached_x_dot = None
 
     def fit(
         self,
@@ -255,6 +260,8 @@ class SINDy(BaseEstimator):
             ("model", self.optimizer),
         ]
         x_dot = concat_sample_axis(x_dot)
+        if self.cache:
+            self.cached_x_dot = np.array(x_dot)
         self.model = Pipeline(steps)
         self.model.fit(x, x_dot)
 
@@ -564,6 +571,40 @@ class SINDy(BaseEstimator):
         """
         check_is_fitted(self, "model")
         return self.feature_library.get_feature_names(input_features=self.feature_names)
+
+    def get_coef_list(self):
+            if hasattr(self, 'coef_list'):
+                return self.coef_list
+            else:
+                return [self.coefficients()]
+
+    def validate_coef_list(self, *validation_data, target_index=0, criterion='aic'):
+            assert len(validation_data) == 2
+            X_pre, y_pre = validation_data
+
+            # Consider directly from model.get_coef_list() ไม่คิด coefficients ใหม่ จากข้อมูลทั้งหมด
+            # print_pde(model.get_coef_list()[np.argmin(np.sum((np.squeeze(np.tensordot(X_pre, np.array(model.get_coef_list()).T, axes=([-1], [0])), axis=1)-y_pre)**2, axis=0))].reshape(-1,1), model.get_feature_names())
+            if len(X_pre.shape) < 3:
+                X_pre = np.expand_dims(X_pre, 0)
+            coef_list = np.squeeze(np.array(self.get_coef_list())[:, target_index:target_index+1, :], axis=1)
+
+            if hasattr(self.optimizer, 'threshold'):
+                print("hasattr threshold in optimizer...")
+                # th = self.optimizer.threshold
+                th = max(self.optimizer.threshold, np.nextafter(0, 1))
+                all_indices = set([tuple(np.where(np.abs(coef_list[i])>=th)[0]) for i in range(len(coef_list))])
+            else:
+                all_indices = set([tuple(np.nonzero(coef_list[i])[0]) for i in range(len(coef_list))])
+
+            out = []
+            for b in range(X_pre.shape[0]):
+                ols_models = [(OLS(y_pre[:, target_index:target_index+1], X_pre[b][:, init_feature]).fit(), init_feature) for init_feature in all_indices]
+                best_ols_index = np.argmin([getattr(m, criterion) for m, _ in ols_models])
+                # see ./utils/base.py for print_pde
+                print_pde(ols_models[best_ols_index][0].params.reshape(-1,1), 
+                        np.array(self.get_feature_names())[list(ols_models[best_ols_index][1])], ut=f"{self.feature_names[target_index]}_t")
+                out.append(ols_models[best_ols_index])
+            return out
 
     def simulate(
         self,

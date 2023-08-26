@@ -170,6 +170,7 @@ class WeakPDELibrary(BaseFeatureLibrary):
         diff_kwargs={},
         is_uniform=None,
         periodic=None,
+        cache=False,
     ):
         self.functions = library_functions
         self.derivative_order = derivative_order
@@ -184,6 +185,8 @@ class WeakPDELibrary(BaseFeatureLibrary):
         self.num_trajectories = 1
         self.differentiation_method = differentiation_method
         self.diff_kwargs = diff_kwargs
+        self.cache = cache
+        self.cached_xp_full = None
 
         if function_names and (len(library_functions) != len(function_names)):
             raise ValueError(
@@ -1049,6 +1052,8 @@ class WeakPDELibrary(BaseFeatureLibrary):
                     library_idx += n_library_terms * self.num_derivatives * n_features
 
             xp_full = xp_full + [AxesArray(xp, {"ax_sample": 0, "ax_coord": 1})]
+        if self.cache:
+            self.cached_xp_full = np.array(xp_full)
         return xp_full
 
     def calc_trajectory(self, diff_method, x, t):
